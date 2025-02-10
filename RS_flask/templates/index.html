@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>基于AI远程自动操控设备</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.3.2/socket.io.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/4.19.0/xterm.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xterm/4.19.0/addons/fit/fit.min.js"></script>
+  <link rel="stylesheet" href="/static/css/xterm.css">
+  <script src="/static/js/xterm.js"></script>
+  <style>
+    body {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      margin: 0;
+      padding: 20px;
+      box-sizing: border-box;
+    }
+    #title {
+      text-align: center;
+      font-size: 24px;
+      font-weight: bold;
+      margin-bottom: 10px;
+    }
+    #container {
+      display: flex;
+      flex: 1;
+      gap: 10px;
+    }
+    #terminal-container {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border: 2px solid #ddd;
+      position: relative;
+    }
+    #terminal {
+      flex: 1;
+      background-color: black;
+    }
+    #settings-btn {
+      position: absolute;
+      top: 10px;
+      right: 20px;
+      padding: 5px 10px;
+      cursor: pointer;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      z-index: 100;
+    }
+    #settings-modal {
+      display: none;
+      position: absolute;
+      top: 50px;
+      right: 20px;
+      background: white;
+      border: 1px solid #ccc;
+      padding: 10px;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+      z-index: 101;
+    }
+    #chat {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      border: 2px solid #ddd;
+    }
+    #chat-box {
+      flex: 1;
+      overflow-y: auto;
+      padding: 10px;
+      background-color: #f9f9f9;
+    }
+    #chat-input {
+      padding: 10px;
+      border-top: 2px solid #ddd;
+      display: flex;
+    }
+    #chat-input input {
+      flex: 1;
+      padding: 8px;
+      font-size: 16px;
+    }
+    #chat-input button {
+      padding: 8px;
+      font-size: 16px;
+      margin-left: 5px;
+    }
+    .msg-user {
+      text-align: right;
+      padding: 8px;
+      margin: 5px;
+      border-radius: 5px;
+      max-width: 80%;
+      align-self: flex-end;
+      background-color: transparent;
+      color: #333;
+    }
+    .msg-ai {
+      text-align: left;
+      padding: 8px;
+      margin: 5px;
+      border-radius: 5px;
+      max-width: 80%;
+      align-self: flex-start;
+      background-color: transparent;
+      color: #007bff;
+    }
+  </style>
+</head>
+<body>
+  <div id="title">基于AI远程自动操控设备</div>
+  <div id="container">
+    <div id="terminal-container">
+      <button id="settings-btn" onclick="toggleSettings()">设置</button>
+      <div id="settings-modal">
+        <label>设备IP:
+          <input type="text" id="device-ip" placeholder="192.168.1.1">
+        </label><br>
+        <label>端口:
+          <input type="number" id="device-port" placeholder="23">
+        </label><br>
+        <button onclick="connectToDevice()">连接</button>
+      </div>
+      <div id="terminal"></div>
+    </div>
+    <div id="chat">
+      <div id="chat-box"></div>
+      <div id="chat-input">
+        <input type="text" id="message" placeholder="输入消息...">
+        <button id="send-btn">发送</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    const socket = io('http://127.0.0.1:5001');
+    const term = new Terminal({ cols: 80, rows: 47, scrollback: 1000 });
+    term.open(document.getElementById('terminal'));
+    term.write("连接到设备...请输入命令...\n");
+    let commandBuffer = "";
+    term.onData(e => {
+      if (e === '\r') {
+        if (commandBuffer.trim()) {
+          socket.emit('ssh_input', { cmd: commandBuffer });
+          term.write("\r\n" + commandBuffer + "\r\n");
+        }
+        commandBuffer = "";
+      } else if (e === '\x7f') {
+        if (commandBuffer.length > 0) {
+          commandBuffer = commandBuffer.slice(0, -1);
+          term.write("\b \b");
+        }
+      } else {
+        commandBuffer += e;
+        term.write(e);
+      }
+    });
+    socket.on('ssh_output', (data) => {
+      term.write(data.data);
+    });
+    function toggleSettings() {
+      const modal = document.getElementById('settings-modal');
+      modal.style.display = (modal.style.display === 'block') ? 'none' : 'block';
+    }
+    function connectToDevice() {
+      const ip = document.getElementById('device-ip').value;
+      const port = document.getElementById('device-port').value || 23;
+      socket.emit('connect_device', { ip, port });
+    }
+    document.getElementById("send-btn").addEventListener("click", function() {
+      const messageInput = document.getElementById("message");
+      const message = messageInput.value.trim();
+      if (message) {
+        socket.emit('chat_message', { message });
+        const chatBox = document.getElementById("chat-box");
+        const userMessage = document.createElement("div");
+        userMessage.className = "msg-user";
+        userMessage.innerText = message;
+        chatBox.appendChild(userMessage);
+        messageInput.value = "";
+      }
+    });
+    socket.on("chat_reply", (data) => {
+  console.log(data); // This will help you inspect the structure of the response
+  const chatBox = document.getElementById("chat-box");
+  const aiMessage = document.createElement("div");
+  aiMessage.className = "msg-ai";
+
+  // If the reply is an object, convert it to a string
+  aiMessage.innerText = typeof data.reply === 'string' ? data.reply : JSON.stringify(data.reply);
+
+  chatBox.appendChild(aiMessage);
+});
+  </script>
+</body>
+</html>
